@@ -33,7 +33,7 @@ class MSHRSelector(implicit p: Parameters) extends HuanCunModule {
   })
   // 并行操作什么的
   io.out.valid := ParallelOR(io.idle)
-  // 作用是生成idOH，对1左移i位。
+  // 作用是生成idOH，对1左移i位。试试真假
   io.out.bits := ParallelPriorityMux(io.idle.zipWithIndex.map {
     case (b, i) => (b, (1 << i).U)
   })
