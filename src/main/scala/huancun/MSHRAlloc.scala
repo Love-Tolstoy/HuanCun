@@ -16,7 +16,6 @@
   */
 
 // See LICENSE.SiFive for license details.
-// hahfnfdo
 
 package huancun
 
@@ -32,7 +31,9 @@ class MSHRSelector(implicit p: Parameters) extends HuanCunModule {
     val idle = Input(Vec(mshrs, Bool()))
     val out = ValidIO(UInt(mshrs.W))
   })
+  // 并行操作什么的
   io.out.valid := ParallelOR(io.idle)
+  // 作用是生成idOH，对1左移i位。
   io.out.bits := ParallelPriorityMux(io.idle.zipWithIndex.map {
     case (b, i) => (b, (1 << i).U)
   })
