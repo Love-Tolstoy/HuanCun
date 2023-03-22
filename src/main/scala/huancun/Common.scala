@@ -132,7 +132,7 @@ trait HasChannelBits { this: Bundle =>
 }
 
 class MSHRRequest(implicit p: Parameters) extends HuanCunBundle with HasChannelBits {
-  val opcode = UInt(3.W)
+  val opcode = UInt(3.W)  //操作码，每个通道的操作码对应一种操作
   val param = UInt(3.W)
   val size = UInt(msgSizeBits.W)
   val source = UInt(sourceIdBits.W) // 0 when this req is a Hint

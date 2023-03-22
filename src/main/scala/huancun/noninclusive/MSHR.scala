@@ -11,6 +11,7 @@ import huancun.utils._
 import huancun.MetaData._
 import utility.ParallelMax
 
+// 非主要class，先不管
 class C_Status(implicit p: Parameters) extends HuanCunBundle {
   // When C nest A, A needs to know the status of C and tells C to release through to next level
   val set = Input(UInt(setBits.W))
@@ -20,6 +21,7 @@ class C_Status(implicit p: Parameters) extends HuanCunBundle {
   val releaseThrough = Output(Bool())
 }
 
+// 非主要class，先不管
 class B_Status(implicit p: Parameters) extends HuanCunBundle {
   val set = Input(UInt(setBits.W))
   val tag = Input(UInt(tagBits.W))
@@ -47,6 +49,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val io_is_nestedReleaseData = IO(Output(Bool()))
   val io_is_nestedProbeAckData = IO(Output(Bool()))
   val io_probeHelperFinish = IO(Output(Bool()))
+  // 以上为MSHR的各个接口，包括模块内部x MSHR之间的连接
 
   val req = Reg(new MSHRRequest)
   val req_valid = RegInit(false.B)
@@ -62,30 +65,40 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     "Directory result was sent to mismatch MSHR(mshrId:%d, resultId:%d)",
     io.id,
     OHToUInt(io.dirResult.bits.idOH)
+    // idOH的定义在BaseDirectory.scala中，用于标识mshr的独热码
   )
+  // 对meta的valid/reg/wire都进行了分配
   when(io.dirResult.valid) {
     meta_valid := true.B
     meta_reg := io.dirResult.bits
   }
   meta := Mux(io.dirResult.valid, io.dirResult.bits, meta_reg)
+  // 定义了 本层的元数据 和 上层的元数据的权限，作为初始值
   val self_meta = meta.self
   val clients_meta = meta.clients.states
   clients_meta_reg := meta_reg.clients.states
+  // 防止被优化
   dontTouch(self_meta)
   dontTouch(clients_meta)
 
   // Final meta to be written
   val new_self_meta = WireInit(self_meta)
   val new_clients_meta = WireInit(clients_meta)
+  // channel A的两个操作码，分别对应AcquireBlock（6）和AcquirePerm（7）
   val req_acquire = req.opcode === AcquireBlock || req.opcode === AcquirePerm
+  // opcode的高两位
   val req_put = req.opcode(2,1) === 0.U
+  // 本层权限是否需要变成T（Tip or Trunk），目前的功能操作不做深究
   val req_needT = needT(req.opcode, req.param)
   val promoteT_safe = RegInit(true.B)
   val gotT = RegInit(false.B)
   val gotDirty = RegInit(false.B)
   val a_do_release = RegInit(false.B)
   val a_do_probe = RegInit(false.B)
+  // meta是DIRResult的实例化，self是SelfDirResult的实例化，SelfDirResult extends SelfDirEntry，SelfDirEntry中有向量clientStates
+  // 先判断clientStates向量的每个缓存状态是否是INVALID，然后得到一个Bool向量，再由Cat组合，最后按位与。选中的块没有被其他client拥有
   val meta_no_clients = Cat(self_meta.clientStates.map(_ === INVALID)).andR()
+  // 若是对应的操作，且对self_meta是否命中分类讨论
   val req_promoteT = req_acquire && Mux(
     self_meta.hit,
     meta_no_clients && self_meta.state === TIP,
@@ -93,6 +106,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   )
   val probe_dirty = RegInit(false.B) // probe a block that is dirty
   val probes_done = RegInit(0.U(clientBits.W))
+  // 权限下降
   val client_shrink_perm =
     isToN(req.param) && clients_meta(iam).state =/= INVALID || isToB(req.param) && isT(clients_meta(iam).state)
   val clients_hit = VecInit(clients_meta.map(_.hit)).asUInt.orR
@@ -106,14 +120,19 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val will_be_free = Wire(Bool())
 
   val req_client_meta = clients_meta(iam)
+  // 上层目录命中标志位
   val client_hit_flag = Hold(req_client_meta.hit, l2Only = true)
+  // 缓存别名问题
   val cache_alias = !req.isPrefetch.getOrElse(false.B) && client_hit_flag && req_acquire &&
     req_client_meta.alias.getOrElse(0.U) =/= req.alias.getOrElse(0.U)
+  // 表示本层和上层保存的该块（没有命中的块直接为INVALID）的最高权限
   val highest_perm = ParallelMax(
     Seq(Mux(self_meta.hit && !io_probeAckDataThrough, self_meta.state, INVALID)) ++
       clients_meta.map(m => Mux(m.hit, m.state, INVALID))
   ) // the highest perm of this whole level, including self and clients
+  // Hold可保存输入的数据信号的状态，并通过一些判断条件决定是否保持
   val highest_perm_reg = Hold(highest_perm, l2Only = false)
+  // 表示本层和上层保存的该块（没有命中的块直接为INVALID）的最高权限，除了请求源对应的块之外
   val highest_perm_except_me = ParallelMax(
     Seq(Mux(self_meta.hit, self_meta.state, INVALID)) ++
       clients_meta.zipWithIndex.map {
@@ -128,12 +147,15 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
 
   val need_block_downwards = RegInit(false.B)
   val inv_self_dir = RegInit(false.B)
+  // ProbeAck的响应信息
   val client_probeack_param_vec_reg = RegInit(VecInit(Seq.fill(clientBits)(0.U(3.W))))
   val client_probeack_param_vec = WireInit(VecInit(Seq.fill(clientBits)(0.U(3.W))))
 
   // When replacing a block in data array, it is not always necessary to send Release,
   // but only when state perm > clientStates' perm or replacing a dirty block
+  // 当替换一个数据块的，不总是要发送Release的，除非当本层数据块的权限大于上层数据块的权限或者替换了一个脏数据块
   val replace_clients_perm = ParallelMax(self_meta.clientStates)
+  // 本层的替换块的权限比所有使用本层替换块的client的权限都大（如果本层是Trunk就不需要向下Release）；被替换的块是一个脏块且本层是T权限
   val replace_need_release = self_meta.state > replace_clients_perm || self_meta.dirty && isT(self_meta.state)
   val replace_param = MuxLookup(
     Cat(self_meta.state, replace_clients_perm),
@@ -596,6 +618,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   }
   when(!s_acquire) { acquire_flag := acquire_flag | true.B }
 
+  // 说是不用管，因为是属于CMO helper的内容
   def x_schedule(): Unit = { // TODO
     // Do probe to maintain coherence
     clients_meta.zipWithIndex.foreach {
@@ -619,6 +642,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     }
   }
 
+  // C请求类型的调度
   def c_schedule(): Unit = {
     // Release
     s_execute := false.B
@@ -658,6 +682,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     }
   }
 
+  // B请求类型的调度
   def b_schedule(): Unit = {
     // Probe
     // TODO: probe a non-existing block is possible?
@@ -718,6 +743,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   }
   val acquirePermMiss = req.opcode === AcquirePerm && !self_meta.hit
 
+  // A请求类型的调度
   def a_schedule(): Unit = {
     // A channel requests
     // TODO: consider parameterized write-through policy for put/atomics
