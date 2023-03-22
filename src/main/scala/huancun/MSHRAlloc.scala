@@ -116,10 +116,12 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
   val nestC = may_nestC && !c_mshr_status.valid
   val nestB = may_nestB && !bc_mshr_status.valid && !c_mshr_status.valid
 
+  // 若14个abc MSHR全处于有效状态，mshrFree才为0，不过这有什么作用呢
   val dirRead = io.dirRead
   val mshrFree = Cat(abc_mshr_status.map(s => !s.valid)).orR()
 
   //val can_accept_c = (mshrFree && !conflict_c) || nestC
+  // accpet_x信号是x请求有效，且MSHR可以接收该请求
   val can_accept_c = (!conflict_c && (mshrFree || !c_mshr_status.valid)) || nestC
   val accept_c = io.c_req.valid && can_accept_c
 
@@ -129,6 +131,7 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
   val can_accept_a = mshrFree && !conflict_a && !io.c_req.valid && !io.b_req.valid
   val accept_a = io.a_req.valid && can_accept_a
 
+  // 这是实现从3个x_req通过有优先级的仲裁器选出对应的x_req赋给request
   request.valid := io.c_req.valid || io.b_req.valid || io.a_req.valid
   request.bits := Mux(io.c_req.valid,
     io.c_req.bits,
@@ -140,6 +143,8 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
   io.b_req.ready := dirRead.ready && can_accept_b
   io.a_req.ready := dirRead.ready && can_accept_a
 
+  // 例化mshrSelector，输出独热编码
+  // 通过for循环，将request的请求信息赋给mshr，14个mshr对应的bits都包含相同的请求，但只有一个位有效
   val mshrSelector = Module(new MSHRSelector())
   mshrSelector.io.idle := abc_mshr_status.map(s => !s.valid)
   val selectedMSHROH = mshrSelector.io.out.bits
@@ -154,6 +159,7 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
     mshr.bits := request.bits
   }
 
+  // 处理bc MSHR和c MSHR，个人理解没错的话，这两个MSHR只会在发生高优先级的请求嵌套时才会使用
   val nestB_valid = io.b_req.valid && nestB && !io.c_req.valid
   val tmpB_valid = io.b_req.valid && !mshrFree && !conflict_b && !bc_mshr_status.valid && !io.c_req.valid
   val nestC_valid = io.c_req.valid && nestC
@@ -169,6 +175,7 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
   io.c_mask.valid := c_mshr_alloc.valid
   io.c_mask.bits := c_match_vec
 
+  // 对directory发送的数据
   dirRead.valid := request.valid && Cat(accept_c, accept_b, accept_a).orR() && dirRead.ready
   dirRead.bits.source := request.bits.source
   dirRead.bits.tag := request.bits.tag
@@ -188,6 +195,7 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
     cntStart := true.B
   }
 
+  // 下面部分应该都是对于预取请求的处理
   if (cacheParams.enablePerf) {
     val mshrCnt = RegInit(VecInit(Seq.fill(mshrsAll)(0.U(16.W))))
     for ((cnt, i) <- mshrCnt.zipWithIndex) {
