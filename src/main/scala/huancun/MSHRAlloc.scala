@@ -50,6 +50,7 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
     // To MSHRs
     val alloc = Vec(mshrsAll, ValidIO(new MSHRRequest))
     // To directory
+    // DecoupledIO和ValidIO分别增加valid、ready信号和valid信号
     val dirRead = DecoupledIO(new DirRead)
     val bc_mask = ValidIO(Vec(mshrsAll, Bool()))
     val c_mask = ValidIO(Vec(mshrsAll, Bool()))
@@ -57,6 +58,7 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
   })
 
   // Allocate one MSHR per cycle
+  // PopCount可以统计1或true的数量，若数量大于等于1，说明有多个MSHR运行，则退出程序
   assert(PopCount(io.alloc.map(_.valid)) <= 1.U)
 
   /* case1: selected request matches set of pending MSHR => stall
@@ -66,10 +68,12 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
    */
 
   /* Select one request from a_req/b_req/c_req */
+  // 这个request信号是a/b/c经过仲裁器得到的信号
   val request = Wire(ValidIO(new MSHRRequest()))
 
   /* Whether selected request can be accepted */
 
+  // 生成一个Bool队列，且队列中的元素只有在MSHR模块返回的MSHR status为有效，且与输入信号的set相等时才为1，目的是MSHR嵌套
   def get_match_vec(req: MSHRRequest, granularity: Int = setBits): Vec[Bool] = {
     VecInit(io.status.map(s => s.valid && s.bits.set(granularity - 1, 0) === req.set(granularity - 1, 0)))
   }
@@ -82,6 +86,7 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
   val b_match_vec = get_match_vec(io.b_req.bits, block_granularity)
   val a_match_vec = get_match_vec(io.a_req.bits, block_granularity)
 
+  // :+ 和 ++ 都是在队列的最后添加额外项
   val nestC_vec = VecInit(
     io.status.map(s => s.valid && s.bits.nestC).init :+ false.B
   )
@@ -89,14 +94,17 @@ class MSHRAlloc(implicit p: Parameters) extends HuanCunModule {
     io.status.map(s => s.valid && s.bits.nestB).init.init ++ Seq(false.B, false.B)
   )
 
+  // 或规约，对x_match_vec转化为UInt，二进制的每一位取或，只要有一位是1就为1
   val conflict_c = c_match_vec.asUInt().orR()
   val conflict_b = b_match_vec.asUInt().orR()
   val conflict_a = a_match_vec.asUInt().orR()
 
+  // .init就是割去最后一位，.last就是取最后一位。所以abc_mshr是取mshr的前14位，其余占后两位
   val abc_mshr_status = io.status.init.init
   val bc_mshr_status = io.status.init.last
   val c_mshr_status = io.status.last
 
+  // 双重嵌套
   val double_nest = Cat(c_match_vec.init.init).orR() && c_match_vec.init.last
   val may_nestC = (c_match_vec.asUInt() & nestC_vec.asUInt()).orR() && !(double_nest && !bc_mshr_status.bits.nestC)
   val may_nestB = (b_match_vec.asUInt() & nestB_vec.asUInt()).orR()
