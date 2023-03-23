@@ -240,12 +240,14 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
       )
   })
 
+  // 若state的权限为T且para为toT，则返回state，说明权限不变；若不是，如果state不是INVALID且param不是toN，则为BRANCH，否则为INVALID。
   def probe_next_state(state: UInt, param: UInt): UInt = Mux(
     isT(state) && param === toT,
     state,
     Mux(state =/= INVALID && param =/= toN, BRANCH, INVALID)
   )
 
+  // 限制param不能为TtoT
   def shrink_next_state(param: UInt): UInt = {
     assert(param =/= TtoT, "ProbeAck toT is not allowed in current design")
     Mux(param === TtoB || param === BtoB, BRANCH, INVALID)
@@ -278,9 +280,14 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     }
   }
 
+  // 这三部分是对权限控制请求的处理，
+  // 即对new_self_meta.diryt/new_self_meta.state/new_self_meta.clientStates/new_clients_meta.state进行操作
   def onCReq(): Unit = {
     // Release / ReleaseData
+    // 如果self目录中原本就有这个块，dirty保持原样
+    // 如果请求时从高权限（T）发送过来的，那么dirty就取决于请求发送过来的块是不是为dirty的
     new_self_meta.dirty := self_meta.hit && self_meta.dirty || req.dirty && isParamFromT(req.param)
+    // req.param与Seq中的一般项比较，若匹配则返回对应的，若不匹配，返回self_meta.state
     new_self_meta.state := MuxLookup(
       req.param,
       self_meta.state,
@@ -293,6 +300,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
         // NtoN -> self_meta.state
       )
     )
+    // isToN包括TtoN/BToN/NToN  isToB包括TtoB/BtoB
     new_self_meta.clientStates.zipWithIndex.foreach {
       case (state, i) =>
         state := Mux(
@@ -323,7 +331,10 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
         BRANCH    ->    BRANCH
       --------------------------
     */
+    // 如果请求来自ProbeHelper，req.param必须为toN，但是self state不能变为INVALID
+    // 只会改变self_meta.clientStates中的状态INVALID
     new_self_meta.dirty := req.fromProbeHelper && !probeAckDataThrough && (self_meta.hit && self_meta.dirty || probe_dirty)
+    // 必须命中self目录（self_meta.hit），不然没有必要改变self_meta.state
     new_self_meta.state := Mux(self_meta.hit,
       Mux(req.fromProbeHelper && !probeAckDataThrough,
         Mux(isT(self_meta.state), TIP, BRANCH),
@@ -467,6 +478,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     }
   }
 
+  // 对请求进行分类（带有优先级）
   when(req.fromC) {
     when(req.fromCmoHelper) {
       onXReq()
@@ -479,6 +491,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     onAReq()
   }
 
+  // 请求对权限的控制实现了传递，从new_self_meta和new_clients_meta传递给了new_self_dir和new_clients_dir
   val new_clients_dir = Wire(Vec(clientBits, new ClientDirEntry))
   val new_self_dir = Wire(new SelfDirEntry)
   new_self_dir.dirty := new_self_meta.dirty
