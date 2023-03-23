@@ -75,6 +75,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   meta := Mux(io.dirResult.valid, io.dirResult.bits, meta_reg)
   // 定义了 本层的元数据 和 上层的元数据的权限，作为初始值
   val self_meta = meta.self
+  // 上层数据目录中上层数据块的权限
   val clients_meta = meta.clients.states
   clients_meta_reg := meta_reg.clients.states
   // 防止被优化
@@ -157,6 +158,8 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val replace_clients_perm = ParallelMax(self_meta.clientStates)
   // 本层的替换块的权限比所有使用本层替换块的client的权限都大（如果本层是Trunk就不需要向下Release）；被替换的块是一个脏块且本层是T权限
   val replace_need_release = self_meta.state > replace_clients_perm || self_meta.dirty && isT(self_meta.state)
+
+  // 类似于一个二选一多路选择器
   val replace_param = MuxLookup(
     Cat(self_meta.state, replace_clients_perm),
     TtoB,
@@ -171,7 +174,12 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     )
   )
 
+  // 若是预取读请求，将本层和上层最高权限是否为INVALID的结果输出；若不是预取读请求，判断本层和上层的权限是否为T，然后取反。
   val prefetch_miss_need_acquire = Mux(req.param === PREFETCH_READ, highest_perm === INVALID, !isT(highest_perm))
+
+  // 预取请求的块没有在本层命中，但是在上层的client中命中，所以需要向上进行Probe（读self directory和client directory就可以得到结果）
+  // prefetch_write情况下，如果本层miss，或者本层不是T权限，且非请求源的client hit，权限为T，那么说明这个client拥有预取指令需要的数据块，需要Probe下来
+  // prefetch_read情况下，如果本层miss，非请求源的client hit，请求源的client miss，说明这个client拥有预取指令需要的数据块
   val prefetch_miss_need_probe_vec = VecInit(clients_meta.zipWithIndex.map {
     case (meta, i) =>
       i.U =/= iam &&
@@ -180,19 +188,24 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   })
   val prefetch_miss_need_probe = Hold(prefetch_miss_need_probe_vec.asUInt.orR, l2Only = true)
   val prefetch_miss = req.opcode === Hint && (prefetch_miss_need_acquire || prefetch_miss_need_probe)
+  // 只有在预取不命中且本层目录没命中才为1
   val prefetch_need_data = prefetch_miss && !self_meta.hit
 
   // self cache does not have the acquired block, but some other client owns the block
+  // 本层没有，其他除了请求源之外的client拥有
   val transmit_from_other_client = !self_meta.hit && Hold(VecInit(clients_meta.zipWithIndex.map {
     case (meta, i) =>
       (req.opcode === Get || req_put || i.U =/= iam) && meta.hit
   }).asUInt.orR, l2Only = false) && (!req.isPrefetch.getOrElse(false.B) || prefetch_need_data)
 
+  // 请求来自A通道，且请求为Get/AcquireBlock/Hit
   val a_need_data = req.fromA && (req.opcode === Get || req_put || req.opcode === AcquireBlock || req.opcode === Hint)
   val acquireperm_alias = req.fromA && req.opcode === AcquirePerm && cache_alias
 
   // 1 cycle ahead its' corresponding register defs
   // these signals are used to decide mshr actions when dirResult.valid on c_schedule
+  // 它对应的寄存器定义提前一个周期
+  // 这些信号被用作决定mshr的状态，当dirResult.valid在c_schedule上时
   val will_release_through = WireInit(false.B)
   val will_drop_release = WireInit(false.B)
   val will_save_release = WireInit(true.B)
@@ -246,6 +259,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     state === BRANCH && perm === toB
   }
 
+  // 这部分不要求，因为CtrlUnit中的CMO在南湖V2中没有使用
   def onXReq(): Unit = {
     new_self_meta.dirty := false.B
     new_self_meta.state := Mux(req.param === 1.U,
@@ -330,6 +344,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   def onAReq(): Unit = {
     // reqs: Acquire / Intent / Put / Get / Atomics
     // new_self_meta.dirty := self_meta.hit && self_meta.dirty || probe_dirty || !req.opcode(2)
+    // gotDirty：子请求在sinkD中接收到的响应数据时Dirty的  probe_dirty：从别的client probe下来的块是脏的
     new_self_meta.dirty := Mux(
       req_acquire,
       Mux(req_needT,
@@ -365,6 +380,8 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
             BRANCH
           ),
         ),
+        // 上面可能理解不对，将self_meta.state与Seq中的匹配项进行比较。如果输入值与序列中的某个匹配项匹配，则返回该匹配项对应的值。
+        // 如果没有匹配的匹配项，则返回默认值INVALID
         MuxLookup(self_meta.state, INVALID, Seq(
           INVALID -> BRANCH,
           BRANCH -> BRANCH,
