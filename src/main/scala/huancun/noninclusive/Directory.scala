@@ -51,6 +51,7 @@ class ClientDirResult(implicit p: Parameters) extends HuanCunBundle with HasClie
   val way = UInt(clientWayBits.W)
   val error = Bool()
 
+  // 截取输入lineAddr从clientSetBits到clientSetBits + clientTagBits - 1的长度
   def parseTag(lineAddr: UInt): UInt = {
     lineAddr(clientSetBits + clientTagBits - 1, clientSetBits)
   }

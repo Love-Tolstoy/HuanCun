@@ -506,6 +506,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
 
   val sink = Reg(UInt(edgeOut.bundle.sinkBits.W))
 
+  // 数据从端没有返回有效的授权信号，上面的数据传递不成立
   val bad_grant = RegInit(false.B)
   // TODO: consider bad grant
   when(bad_grant) {
@@ -516,7 +517,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
         state := Mux(self_meta.hit && i.U =/= iam, new_self_meta.clientStates(i), self_meta.clientStates(i))
     }
   }
-
+  // 地址三要素：tag set offset
   val debug_addr = Cat(req.tag, req.set, 0.U(offsetBits.W))
   assert(RegNext(!meta_valid || !req.fromC || req.fromCmoHelper || clients_meta(iam).hit),
     s"${cacheParams.name} Release should always hit: mshrId:[%d] addr: [%x]",
@@ -524,6 +525,8 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   ) // Release should always hit
 
   // nested writeback to meta_reg
+  // 缓存定位信息，嵌套的高优先级请求的MSHR完成调度控制和权限控制后会释放MSHR，
+  // 此时如果自己的tag也与被嵌套相等，那么就需要将高优先级请求对于目录信息的各种改变写回被嵌套的MSHR
   val change_self_meta = meta_valid && self_meta.state =/= INVALID &&
     io.nestedwb.set === req.set && io.nestedwb.tag === self_meta.tag
   val nested_client_match = (
@@ -535,15 +538,20 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
       meta_valid && meta.state =/= INVALID && nested_client_match
   }
   when(change_self_meta) {
+    // b MSHR嵌套清除self_meta的dirty位（b_clr_dirty）
+    // b MSHR嵌套置位self_meta的dirty位（b_set_dirty）
     when(io.nestedwb.b_clr_dirty) {
       meta_reg.self.dirty := false.B
     }
     when(io.nestedwb.b_set_dirty) {
       meta_reg.self.dirty := true.B
     }
+    // c MSHR嵌套置位self_meta的dirty位
     when(io.nestedwb.c_set_dirty) {
       meta_reg.self.dirty := true.B
     }
+    // b MSHR嵌套写回self_meta，会将self_meta置为INVALID（b_toN）
+    // b MSHR嵌套写回self_meta，会将self_meta置为BRANCH（b_toB）
     when(io.nestedwb.b_toB) {
       meta_reg.self.state := BRANCH
       meta_reg.self.clientStates.foreach { s => s := Mux(isT(s), BRANCH, s) }
@@ -554,6 +562,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
       meta_reg.self.clientStates.foreach(_ := INVALID)
     }
   }
+  // C嵌套命中
   val nested_c_hit_reg = RegInit(false.B)
   val nested_c_hit = WireInit(nested_c_hit_reg)
   when (meta_valid && !self_meta.hit && req.fromA &&
@@ -563,6 +572,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     nested_c_hit_reg := true.B
   }
 
+  // 不懂
   meta_reg.clients.states.zipWithIndex.foreach {
     case (reg, i) =>
       when(change_clients_meta(i)) {
@@ -577,6 +587,8 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   }
 
   // Set tasks to be scheduled and resps to wait for
+  // MSHR在拿到读目录的结果后会把需要完成的时间置位false，表示请求还未发送或者应答还未收到
+  // 在时间完成后再将寄存器置为True，当所有事件都完成后，该项MSHR就会释放。
   val s_acquire = RegInit(true.B) // source_a
   val s_probe = RegInit(true.B) // source_b
   val s_release = RegInit(true.B) // source_c
@@ -774,10 +786,14 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val acquirePermMiss = req.opcode === AcquirePerm && !self_meta.hit
 
   // A请求类型的调度
+  // PTW（Page Table Walker）会发送Get请求给L2，DMA（Direct Memory Access）会发送Get和Put请求给L3
+  // 所以L2接收不到Put请求？？？
   def a_schedule(): Unit = {
     // A channel requests
     // TODO: consider parameterized write-through policy for put/atomics
+    // Hint是由HuanCun的内部模块Prefetcher而发出的
     s_execute := req.opcode === Hint
+    // Set的容量不足，需要进行替换并向下Release
     when(!self_meta.hit && self_meta.state =/= INVALID && replace_need_release &&
       (
         (preferCache && (req.opcode === AcquireBlock || req.opcode === Get)) ||
@@ -790,6 +806,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     ){
       s_release := false.B
       w_releaseack := false.B
+      // a_do_release不属于调度，但其与a和c的嵌套有关
       a_do_release := true.B
     }
 
@@ -805,6 +822,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
       w_grantfirst := false.B
       w_grantlast := false.B
       w_grant := false.B  // for bypassPut case, w_grant actually means w_accessack
+      // 只有Acquire才需要grantack
       when (!bypassGet && !bypassPut) {
         s_grantack := false.B
       }
@@ -814,7 +832,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
         s_wbselfdir := false.B
       }
     }
-    // need probe
+    // need probe 需要向上发送probe
     clients_meta.zipWithIndex.foreach {
       case (meta, i) =>
         when (req.opcode =/= Get && !req_put) {
@@ -886,6 +904,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     assert(req.opcode =/= Hint || req.preferCache, "Hint should always preferCache!")
   }
 
+  // ecc不看
   val self_ecc_err = meta_reg.self.hit && meta_reg.self.error
   val client_ecc_err = Cat(meta_reg.clients.states.map(_.hit)).orR() && meta_reg.clients.error
   io.ecc.valid := meta_valid && (self_ecc_err || client_ecc_err)
@@ -926,6 +945,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     })
   }
 
+  // release请求的三种处理方式：drop丢弃、save保存、through直通
   when(io_releaseThrough && io.dirResult.valid && req.fromC) {
     assert(req_valid)
     // TtoN or BtoN should release through
