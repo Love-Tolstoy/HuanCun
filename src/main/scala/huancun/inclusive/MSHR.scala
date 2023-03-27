@@ -29,6 +29,8 @@ import huancun._
 import huancun.MetaData._
 import huancun.prefetch._
 
+// 这里只有tasks/dir_write/tag_write/dirResult四个信号，没有resps/status/alloc
+// extends的BaseMSHR中定义了一个BaseMSHRIO类型的io，BaseMSHRIO中有信号resps/status/alloc等
 class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWrite] {
   val io = IO(new BaseMSHRIO[DirResult, DirWrite, TagWrite] {
     override val tasks = new MSHRTasks[DirWrite, TagWrite] {
@@ -46,6 +48,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
 
   // Get directory result
   assert(
+    // 初始值为true，下一个时钟到来时更新为第一个参数
     RegNext(!io.dirResult.valid || req_valid && !meta_valid, true.B),
     "Directory result was sent to mismatch MSHR(mshrId:%d, resultId:%d)",
     io.id,
@@ -56,6 +59,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
     meta_valid := true.B
     meta_reg := io.dirResult.bits
   }
+  // 若dirResult有效，则更新元数据，否则保持不变，dontTouch避免该信号被优化
   meta := Mux(io.dirResult.valid, io.dirResult.bits, meta_reg)
   dontTouch(meta)
 
@@ -64,7 +68,8 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
   val req_acquire = req.opcode === AcquireBlock || req.opcode === AcquirePerm
   val req_needT = needT(req.opcode, req.param)
   val gotT = RegInit(false.B) // L3 might return T even though L2 wants B
-  val meta_no_client = !meta.clients.orR
+  val meta_no_client = !meta.clients.orR  // 有1位是1就为0，否则为1
+  // 请求为acquire，若命中，就要求meta.clients为0并且meta.state为TIP；若不命中，取gotT
   val req_promoteT = req_acquire && Mux(meta.hit, meta_no_client && meta.state === TIP, gotT)
   val req_realBtoT = meta.hit && (meta.clients & getClientBitOH(req.source)).orR
   val prefetch_miss = hintMiss(meta.state, req.param)
@@ -143,7 +148,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
   }
 
   assert(RegNext(!meta_valid || !req.fromC || meta.hit, true.B)) // Release should always hit
-
+  // 当dirResult有效时，meta_valid置为1
   val change_meta = meta_valid && meta_reg.state =/= INVALID &&
     (io.nestedwb.set === req.set && io.nestedwb.tag === meta.tag)
 
@@ -213,6 +218,8 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
     probes_done := 0.U
     bad_grant := false.B
 
+    // Checks for a condition to be valid in the circuit at all times. If the
+    // condition evaluates to false, the circuit simulation stops with an error.
     assert(!io.dirResult.bits.hit || !io.dirResult.bits.error)
 
     when(req.fromC) {
