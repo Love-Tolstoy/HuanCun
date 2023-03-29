@@ -460,14 +460,21 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     strict: Boolean = false,
     latch:  Boolean = false
   ) = {
+    // require内的条件，如果不满足，则抛出异常
     require(!strict || in.size == mshrsAll)
+    // in的Seq内的项数是16
     if (in.size == mshrsAll) {
       val abc = in.init.init
       val bc = in.init.last
       val c = in.last
+      // Module用于创建硬件模块的基本单元，这里是创建一个任务调度器的仲裁器
+      // 如果latch，那么生成一个LatchFastArbiter，每个输入通道只有在当前任务完成后才能转移到下一项任务
+      // 否则，生成一个FastArbiter，所以输入通道可以同时提交任务，并按优先级进行仲裁
       val arbiter = Module(if (latch) new LatchFastArbiter[T](chiselTypeOf(out.bits), abc.size) 
                            else new FastArbiter[T](chiselTypeOf(out.bits), abc.size))
+      // 为仲裁器进行命名
       if (name.nonEmpty) arbiter.suggestName(s"${name.get}_task_arb")
+      // 将仲裁器的输入端口与任务队列的请求端口相连
       for ((arb, req) <- arbiter.io.in.zip(abc)) {
         arb <> req
       }

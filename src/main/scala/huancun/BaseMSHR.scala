@@ -8,6 +8,7 @@ import huancun.prefetch._
 abstract class MSHRTasks[T_DIR_W <: BaseDirWrite, T_TAG_W <: BaseTagWrite](implicit p: Parameters)
     extends HuanCunBundle {
   // inner
+  // 这里多了个sink_a
   val sink_a = DecoupledIO(new SinkAReq) // put
   val source_b = DecoupledIO(new SourceBReq) // probe
   val sink_c = DecoupledIO(new SinkCReq) // inner release
@@ -25,6 +26,7 @@ abstract class MSHRTasks[T_DIR_W <: BaseDirWrite, T_TAG_W <: BaseTagWrite](impli
 }
 
 class MSHRResps(implicit p: Parameters) extends HuanCunBundle {
+  // 这里多了个source_d，只在Noninclusive中使用了
   val sink_c = ValidIO(new SinkCResp)
   val sink_d = ValidIO(new SinkDResp)
   val sink_e = ValidIO(new SinkEResp)
