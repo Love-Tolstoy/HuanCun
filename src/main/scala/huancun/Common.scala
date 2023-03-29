@@ -202,7 +202,7 @@ class SourceDHazard(implicit p: Parameters) extends HuanCunBundle {
   }
 }
 
-class ReplacerInfo() extends Bundle {
+class ReplacerInfo () extends Bundle {
   val channel = UInt(3.W)
   val opcode = UInt(3.W)
 }

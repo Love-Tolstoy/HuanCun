@@ -48,8 +48,12 @@ class Directory(implicit p: Parameters) extends BaseDirectory[DirResult, DirWrit
   val io = IO(new DirectoryIO())
 
   def invalid_way_sel(metaVec: Seq[DirectoryEntry], repl: UInt) = {
+    // way is empty，为什么可以这么判断呢
     val invalid_vec = metaVec.map(_.state === MetaData.INVALID)
+    // 若有一个state为Invalid，则为1
     val has_invalid_way = Cat(invalid_vec).orR()
+    // 选择器括号内的语句是将invalid_vec向量中的每个元素和对应的索引值进行一一配对，并将它们转换成一个元组，x._2表示索引值
+    // 该函数会将invalid_vec向量中所有的true值所对应的索引号提取出来，并对它们进行并行选择，得到一个位宽位wayBits的输出信号
     val way = ParallelPriorityMux(invalid_vec.zipWithIndex.map(x => x._1 -> x._2.U(wayBits.W)))
     (has_invalid_way, way)
   }

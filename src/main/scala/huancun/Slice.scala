@@ -470,6 +470,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
       // Module用于创建硬件模块的基本单元，这里是创建一个任务调度器的仲裁器
       // 如果latch，那么生成一个LatchFastArbiter，每个输入通道只有在当前任务完成后才能转移到下一项任务
       // 否则，生成一个FastArbiter，所以输入通道可以同时提交任务，并按优先级进行仲裁
+      // 这里生成的长度为abc.size，所以只对abc MSHR做仲裁
       val arbiter = Module(if (latch) new LatchFastArbiter[T](chiselTypeOf(out.bits), abc.size) 
                            else new FastArbiter[T](chiselTypeOf(out.bits), abc.size))
       // 为仲裁器进行命名
@@ -491,9 +492,12 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
         val bc_valid_latch = RegNext(bc.valid)
         val c_bits_latch = RegEnable(c.bits, c.valid)
         val c_valid_latch = RegNext(c.valid)
+        // 用两拍证明bc、c确实有效
         val bc_real_valid = bc.valid && bc_valid_latch
         val c_real_valid = c.valid && c_valid_latch
+        // 这里是arbiter.io.out，说明已经经过仲裁器了，io.in为Decoupled向量，io.out为Decoupled
         out.valid := c_real_valid || bc_real_valid || arbiter.io.out.valid
+        // 优先级处理MSHR发来的task
         out.bits := Mux(c_real_valid, c_bits_latch, Mux(bc_real_valid, bc_bits_latch, arbiter.io.out.bits))
         c.ready := out.ready && c_valid_latch
         bc.ready := out.ready && bc_valid_latch && !c_real_valid
