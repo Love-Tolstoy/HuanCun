@@ -76,6 +76,7 @@ class Directory(implicit p: Parameters) extends BaseDirectory[DirResult, DirWrit
       replacement = cacheParams.replacement
     ) with UpdateOnAcquire
   )
+  // 两者区别，req是Directory模块外部来自MSHR Alloc的信号，rport是Directory模块内部作为selfDir和clientDir输入的信号
   val rport = dir.io.read
   val req = io.read
   rport.valid := req.valid
@@ -86,6 +87,7 @@ class Directory(implicit p: Parameters) extends BaseDirectory[DirResult, DirWrit
   rport.bits.way := DontCare
   req.ready := rport.ready
   val reqIdOHReg = RegEnable(req.bits.idOH, req.fire())
+  // resp是Directory模块外部发向MSHR的信号，selfResp是Directory模块内部作为selfDir和clientDir输出的信号
   val resp = io.result
   val selfResp = dir.io.resp
   resp.valid := selfResp.valid
@@ -98,7 +100,7 @@ class Directory(implicit p: Parameters) extends BaseDirectory[DirResult, DirWrit
   resp.bits.clients := selfResp.bits.dir.clients
   resp.bits.prefetch.foreach(p => p := selfResp.bits.dir.prefetch.get)
   resp.bits.error := selfResp.bits.error
-  // Self Tag Write
+  // Self Tag Write，方向是模块外向模块内
   dir.io.tag_w.valid := io.tagWReq.valid
   dir.io.tag_w.bits.tag := io.tagWReq.bits.tag
   dir.io.tag_w.bits.set := io.tagWReq.bits.set
