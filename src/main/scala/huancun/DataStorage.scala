@@ -41,13 +41,21 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   })
 
   /* Define some internal parameters */
+  // nrStacks = 2  stackBits = 1  bankBytes = 8  rowBytes = 64
+  // nrRows = 8 * 4096 * 64 / 64 = 8(way) * 4096(set)
+  // nrBanks = 8  rowBits = 15  stackSize = 4
+  // 对于这些bank，可以看做两个stack（beat）
   val nrStacks = 2
   val stackBits = log2Ceil(nrStacks)
+  // 每个bank是8个字节
   val bankBytes = 8
   val rowBytes = nrStacks * beatBytes
+  // 对于L2，应该是4096行，4096 * 32 * 2 * 4
   val nrRows = sizeBytes / rowBytes
+  // 一个Cache line可以分成8个bank
   val nrBanks = rowBytes / bankBytes
   val rowBits = log2Ceil(nrRows)
+  // 每个stack有32个字节
   val stackSize = nrBanks / nrStacks
   val sramSinglePort = true
 
@@ -55,7 +63,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   // All banks can be grouped by nrStacks. We call such group as stack
   //     one row ==> ******** ******** ******** ********
   // If there's no conflict, one row can be accessed in parallel by nrStacks
-
+  // 猜测：L2、L3的每个Cache line大小都是64字节，可以分成两个stack，理论上只要两个stack的访问没有产生冲突，就可以实现两个stack的同时访问
   def dataCode: Code = Code.fromString(p(HCCacheParamsKey).dataECC)
 
   val eccBits = dataCode.width(8 * bankBytes) - 8 * bankBytes
@@ -64,13 +72,18 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   val bankedData = Seq.fill(nrBanks) {
     Module(
       new SRAMWrapper(
+        // gen的单位可能是bit，所以是8 * 8
         gen = UInt((8 * bankBytes).W),
+        // set是数据的行数，这里的行数可能是之前的set * way
         set = nrRows,
+        // SRAM每n个时钟周期进行一次读/写操作，这里的n是1
         n = cacheParams.sramDepthDiv,
+        // 控制SRAM的时钟是否分频，默认是false
         clk_div_by_2 = cacheParams.sramClkDivBy2
       )
     )
   }
+  // ECC相关不涉及，nanhu_v2未使用
   val dataEccArray = if (eccBits > 0) {
     Seq.fill(nrStacks) {
       Module(new SRAMWrapper(
@@ -94,6 +107,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   class DSRequest extends HuanCunBundle {
     val wen = Bool()
     val index = UInt((rowBytes * 8).W)
+    // 进行内部请求转化的时候，根据外部请求的beat，通过内部处理转化成内部请求的bank的掩码（banksel)
     val bankSel = UInt(nrBanks.W)
     val bankSum = UInt(nrBanks.W)
     val bankEn = UInt(nrBanks.W)
@@ -115,13 +129,14 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
         .tabulate(nrStacks) { i =>
           !out.bankSum((i + 1) * stackSize - 1, i * stackSize).orR
         }
-        .reverse
+        .reverse  // 翻转高低位
     )
     addr.ready := accessVec(stackIdx) && stackRdy(stackIdx)
 
     out.wen := wen.B
     out.index := innerIndex
     // FillInterleaved: 0010 => 00000000 00000000 11111111 00000000
+    // stackSel的每一位都重复stackSize个，但是上面为什么重复8个
     out.bankSel := Mux(addr.valid, FillInterleaved(stackSize, stackSel), 0.U) // TODO: consider mask
     out.bankEn := Mux(addr.bits.noop || !stackRdy(stackIdx),
       0.U,
@@ -138,7 +153,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   val sinkD_wreq = req(wen = true, io.sinkD_waddr, io.sinkD_wdata)
   val sinkC_req = req(wen = true, io.sinkC_waddr, io.sinkC_wdata)
 
-  val reqs =
+  val reqs = {
     Seq(
       sourceC_req,
       sinkC_req,
@@ -146,6 +161,8 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
       sourceD_wreq,
       sourceD_rreq
     ) // TODO: add more requests with priority carefully
+  }
+  // sum的初始值是0，返回的req.bankSel | sum作为下一次迭代的sum的值
   reqs.foldLeft(0.U(nrBanks.W)) {
     case (sum, req) =>
       req.bankSum := sum
@@ -162,6 +179,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   val cycleCnt = Counter(true.B, 2)
   // mark accessed banks as busy
   if (cacheParams.sramClkDivBy2) {
+    // grouped的作用是把bank_en分组为长度为stackSize的列表，每个元素时一个UInt类型的值，toList把他们转换为列表
     bank_en.grouped(stackSize).toList
       .map(banks => Cat(banks).orR())
       .zip(stackRdy)
@@ -178,6 +196,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
     if (cacheParams.sramClkDivBy2) {
       // Write
       val wen = en && selectedReq.wen
+      // 延迟一个周期吗
       val wen_latch = RegNext(wen, false.B)
       bankedData(i).io.w.req.valid := wen_latch
       bankedData(i).io.w.req.bits.apply(
@@ -232,6 +251,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   val dataSelModules = Array.fill(stackSize) {
     Module(new DataSel(nrStacks, 2, bankBytes * 8, eccBits))
   }
+  // data_grps是一个列表，其中每个元素都是长度为stackSize的子列表
   val data_grps = outData.grouped(stackSize).toList.transpose
   val ecc_grps = eccData.map(_.toList.transpose)
   val d_sel = sourceD_rreq.bankEn.asBools().grouped(stackSize).toList.transpose
@@ -251,6 +271,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   io.sourceC_rdata.data := Cat(dataSelModules.map(_.io.out(1)).reverse)
   io.sourceC_rdata.corrupt := Cat(dataSelModules.map(_.io.err_out(1))).orR()
 
+  // 根据sramLatency进行延迟后输出
   val d_addr_reg = RegNextN(io.sourceD_raddr.bits, sramLatency)
   val c_addr_reg = RegNextN(io.sourceC_raddr.bits, sramLatency)
 
@@ -264,6 +285,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   val debug_stack_used = PopCount(bank_en.grouped(stackSize).toList.map(seq => Cat(seq).orR))
 
   for (i <- 1 to nrStacks) {
+    // 性能计数器
     XSPerfAccumulate(cacheParams, s"DS_${i}_stacks_used", debug_stack_used === i.U)
   }
 
