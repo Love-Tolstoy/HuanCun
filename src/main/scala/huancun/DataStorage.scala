@@ -43,14 +43,14 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   /* Define some internal parameters */
   // nrStacks = 2  stackBits = 1  bankBytes = 8  rowBytes = 64
   // nrRows = 8 * 4096 * 64 / 64 = 8(way) * 4096(set)
-  // nrBanks = 8  rowBits = 15  stackSize = 4
+  // nrBanks = 8  rowBits = 12  stackSize = 4
   // 对于这些bank，可以看做两个stack（beat）
   val nrStacks = 2
   val stackBits = log2Ceil(nrStacks)
   // 每个bank是8个字节
   val bankBytes = 8
   val rowBytes = nrStacks * beatBytes
-  // 对于L2，应该是4096行，4096 * 32 * 2 * 4
+  // 对于L2，应该是4096行
   val nrRows = sizeBytes / rowBytes
   // 一个Cache line可以分成8个bank
   val nrBanks = rowBytes / bankBytes
@@ -118,6 +118,7 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
     // Remap address
     // [beat, set, way, block] => [way, set, beat, block]
     //                            [index, stack, block]
+    // innerAdd = (innerIndex, stackIdx)
     val innerAddr = Cat(addr.bits.way, addr.bits.set, addr.bits.beat)
     val innerIndex = innerAddr >> stackBits
     val stackIdx = innerAddr(stackBits - 1, 0)

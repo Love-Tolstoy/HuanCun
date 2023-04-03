@@ -41,20 +41,35 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
   io.task.ready := false.B
 
   val a = io.a
+  // count统计当a有效时，统计其中true的数量
+  // 把输入的数据拆成四份
   val (first, last, done, count) = edgeIn.count(a)
+  // 接收到的请求是否携带数据
   val hasData = edgeIn.hasData(a.bits)
 
+  // beats = 2? 每一个PutBufferBeatEntry项包含256位宽的数据和32位宽的掩码（1位掩码对应位数据）
+  // bufBlocks = mshrs / 2 = 7，所以purBuffer是一个7*2，每一项都是PutBufferBeatEntry的存储器
   val beats = blockBytes / beatBytes
   val putBuffer = Reg(Vec(bufBlocks, Vec(beats, new PutBufferBeatEntry())))
+  // 变量beatVals来记录每一项是否有效，初始化值为false.B
   val beatVals = RegInit(VecInit(Seq.fill(bufBlocks) {
     VecInit(Seq.fill(beats) { false.B })
   }))
+  // 括号内的操作对bufBlocks行内的beats个元素进行或规约，然后组成一个7位的向量，最后转换为7位的UInt类型
+  // 它的每一位标志着对应的bufBlocks内是否有beat是有效
   val bufVals = VecInit(beatVals.map(_.asUInt().orR())).asUInt()
+  // 只有bufVals的所有位都为1才把满标志位置1，但是一个bufBlocks中只有一个有效也会置1
   val full = bufVals.andR()
+  // 当满了且请求带数据
   val noSpace = full && hasData
+  // 对bufVals按位取反，PriorityEncoder作用是返回输入向量的最低位为1的位置
+  // PriorityEncoder("b0110".U) // results in 1.U
+  // insertIdx标志最低位的能够容纳数据的某个数据行
   val insertIdx = PriorityEncoder(~bufVals)
+  // 请求有效且接受到了第一个数据位
   val insertIdxReg = RegEnable(insertIdx, a.fire() && first)
 
+  // 当请求有效且携带数据，当接收到的是首个数据，那么
   when(a.fire() && hasData) {
     when(first) {
       putBuffer(insertIdx)(count).data := a.bits.data
