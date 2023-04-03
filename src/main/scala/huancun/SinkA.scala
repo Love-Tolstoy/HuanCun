@@ -69,7 +69,7 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
   // 请求有效且接受到了第一个数据位
   val insertIdxReg = RegEnable(insertIdx, a.fire() && first)
 
-  // 当请求有效且携带数据，当接收到的是首个数据，那么
+  // 当请求有效且携带数据，当接收到的是首个数据，那么直接赋值，否则使用寄存器的值
   when(a.fire() && hasData) {
     when(first) {
       putBuffer(insertIdx)(count).data := a.bits.data
@@ -84,6 +84,7 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
     })
   }
 
+  // 为什么检查索引0
   val bufferLeakCnt = RegInit(0.U(12.W)) // check buffer leak for index 0
   dontTouch(bufferLeakCnt)
   when(bufVals(0)) {
@@ -96,8 +97,10 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
     assert(false.B, "buffer leak at index 0")
   }
 
+  // 将地址刨去bankset，然后分块
   val (tag, set, offset) = parseAddress(a.bits.address)
 
+  // 当输入请求有效，且接到第一个数据位，并且没有发生请求阻塞
   io.alloc.valid := a.valid && first && !noSpace
   a.ready := Mux(first, io.alloc.ready && !noSpace, true.B)
 
@@ -112,6 +115,7 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
   allocInfo.off := offset
   allocInfo.mask := a.bits.mask
   allocInfo.bufIdx := insertIdx
+  // 预取？ lift用于从Option类型中提取值，如果该字段不存在，则返回None
   allocInfo.needHint.foreach(_ := a.bits.user.lift(PrefetchKey).getOrElse(false.B))
   allocInfo.isPrefetch.foreach(_ := a.bits.opcode === TLMessages.Hint)
   allocInfo.isBop.foreach(_ := false.B)
@@ -128,6 +132,7 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
   allocInfo.needProbeAckData.foreach(_ := false.B)
 
   io.d_pb_pop.ready := beatVals(io.d_pb_pop.bits.bufIdx)(io.d_pb_pop.bits.count)
+  // 当d_pb_pop有效时，从PutBuffer取出数据到d_pb_beat，在d_pb_pop有效且数据位最后一位，将对应的元素无效化
   io.d_pb_beat := RegEnable(putBuffer(io.d_pb_pop.bits.bufIdx)(io.d_pb_pop.bits.count), io.d_pb_pop.fire())
   when(io.d_pb_pop.fire() && io.d_pb_pop.bits.last) {
     beatVals(io.d_pb_pop.bits.bufIdx).foreach(_ := false.B)

@@ -45,8 +45,9 @@ case class CacheParameters
   val needResolveAlias = aliasBitsOpt.nonEmpty
 }
 
+// 定义了一个控制键‘PrefetchKey’，其名称为needHint，用于控制缓存的预取操作
 case object PrefetchKey extends ControlKey[Bool](name = "needHint")
-
+// 用于缓存分配信息数据结构中的needHint字段
 case class PrefetchField() extends BundleField(PrefetchKey) {
   override def data: Bool = Output(Bool())
 
