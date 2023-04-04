@@ -62,6 +62,7 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
   val s3_valid, s3_ready = Wire(Bool())
   val s4_ready = Wire(Bool())
 
+  // A请求且操作为GrantData、AccessAckData、AccessAck其中的一种，且不能为bypassPut
   def needData(req: SourceDReq): Bool = {
     req.fromA && (
       req.opcode === TLMessages.GrantData ||
@@ -81,10 +82,11 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
   val s1_total_beats = Mux(s1_needData, totalBeats(s1_req.size), 0.U(beatBits.W))
   val s1_beat = startBeat(s1_req.off) | s1_counter
   val s1_valid_r = (busy || (io.task.valid && io.task.bits.opcode =/= TLMessages.PutPartialData)) && s1_needData && !s1_block_r
-  val s1_last = s1_counter === s1_total_beats
+  val s1_last = s1_counter === s1_total_beats // 当发送的beat数等于全部的beat数
   val s1_bypass_hit = io.bypass_read.valid && io.bypass_read.ready
   val s1_bypass_data = io.bypass_read.buffer_data
 
+  // 创建一个含有两个entries的每一项为DSDate类型的队列
   val s1_queue = Module(new Queue(new DSData, 2, flow = false, pipe = false))
   s1_queue.io.enq.valid := s1_bypass_hit
   s1_queue.io.enq.bits := s1_bypass_data
@@ -108,6 +110,7 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
   when(Mux(s1_req.useBypass, s1_bypass_hit, io.bs_raddr.fire())){
     s1_block_r := true.B
   }
+  // 当最后一个Beat的请求发完才允许新的Task进入
   when(s1_valid && s2_ready) {
     s1_counter := s1_counter + 1.U
     s1_block_r := false.B
@@ -145,6 +148,7 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
   io.pb_pop.bits.count := s2_counter
   io.pb_pop.bits.last  := s2_last
 
+  // 创建一个包含6个entries，且每一项是PutBufferBeatEntry的队列
   val pbQueue = Module(new Queue(new PutBufferBeatEntry, beatSize * sramLatency, flow = false, pipe = false))
 
   when (pb_ready) { s2_valid_pb := false.B }

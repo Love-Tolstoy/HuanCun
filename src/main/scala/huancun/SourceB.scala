@@ -33,12 +33,16 @@ class SourceB(implicit p: Parameters) extends HuanCunModule {
 
   /* Resolve task */
   val workVec = RegInit(0.U(clientBits.W))
+  // 当任务有效，更新workVec，它的每一位对应一个需要Probe的Client
   when(io.task.fire) {
     workVec := io.task.bits.clients
   }
+  // 当workVec为空时可以接收来自MSHR的请求
   val busy = workVec.orR
   io.task.ready := !busy
+  // 若busy，则将workVec作为pendingClient，否则，接收task
   val pendingClient = Mux(busy, workVec, io.task.bits.clients)
+  // 在UInt asBools了之后转换成Seq[Bool]型的
   val chosenClient = ParallelPriorityMux(pendingClient.asBools.zipWithIndex.map {
     case (sel, i) => sel -> UIntToOH(i.U, width = clientBits)
   })
