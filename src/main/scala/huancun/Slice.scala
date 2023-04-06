@@ -41,6 +41,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
 
   val ctrl = cacheParams.ctrl.map(_ => Module(new SliceCtrl()))
 
+  // 仲裁器对source和ctrl进行仲裁，为什么ctrl加.get，因为其是Option类型
   def ctrl_arb[T <: Data](source: DecoupledIO[T], ctrl: Option[DecoupledIO[T]]): DecoupledIO[T] ={
     if(ctrl.nonEmpty){
       val arbiter = Module(new Arbiter(chiselTypeOf(source.bits), 2))
@@ -59,6 +60,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   val sourceD = Module(new SourceD)
   val sinkE = Module(new SinkE)
 
+  // io.in.x是Slice的IO的上层，A、C、E是输入，B、D是输出
   val inBuf = cacheParams.innerBuf
   sinkA.io.a <> inBuf.a(io.in.a)
   io.in.b <> inBuf.b(sourceB.io.b)
@@ -82,6 +84,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   io.out.a <> outBuf.a(sourceA.io.a)
   sinkB.io.b <> outBuf.b(io.out.b)
   val out_c = Wire(io.out.c.cloneType)
+  // SinkC的release和SourceC的C响应经过仲裁器连接到out_c
   TLArbiter.lowest(edgeOut, out_c, sinkC.io.release, sourceC.io.c)
   io.out.c <> outBuf.c(out_c)
   sinkD.io.d <> outBuf.d(io.out.d)
@@ -98,6 +101,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   val ms_bc = ms.init.last
   val ms_c = ms.last
 
+  // DataStorage与SinkC、SinkD、SourceC、SourceD的读写交互
   val dataStorage = Module(new DataStorage())
 
   dataStorage.io.sinkD_wdata := sinkD.io.bs_wdata
@@ -132,7 +136,11 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     mshrAlloc.io.b_req <> sinkB.io.alloc
   } else {
     val probeHelper = probeHelperOpt.get
+    // 如果ProbeHelper的队列有空闲，当sinkA.io.alloc有效，那么a_req有效
+    // a_req.bits := sinkA.io.alloc.bits
+    // 如果ProbeHelper的队列有空闲，当a_req准备好了，那么sinkA.io.alloc也准备好了
     block_decoupled(a_req, sinkA.io.alloc, probeHelper.io.full)
+    // 将SinkB的请求和ProbeHelper生成的伪Probe经过仲裁器连接到mshrAlloc
     val b_arb = Module(new Arbiter(new MSHRRequest, 2))
     b_arb.io.in(0) <> probeHelper.io.probe
     b_arb.io.in(1) <> sinkB.io.alloc
@@ -140,6 +148,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   }
   if(prefetchOpt.nonEmpty){
     io.prefetch.get.recv_addr := DontCare
+    // 将SinkA的请求和Prefetch经过仲裁器连接到RequestBuffer的输入
     val alloc_A_arb = Module(new Arbiter(new MSHRRequest, 2))
     alloc_A_arb.io.in(0) <> a_req
     alloc_A_arb.io.in(1) <> pftReqToMSHRReq(io.prefetch.get.req)
@@ -147,8 +156,10 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   } else {
     a_req_buffer.io.in <> a_req
   }
+  // 将RequestBuffer的输出与MSHRAlloc的输入连接
   mshrAlloc.io.a_req <> a_req_buffer.io.out
   if(ctrl.nonEmpty) { // LLC
+    // CtrlUnit和SliceCtrl
     val cmo_req = Pipeline(ctrl.get.io.cmo_req)
     sinkC.io.alloc.ready := mshrAlloc.io.c_req.ready
     cmo_req.ready := !sinkC.io.alloc.valid && mshrAlloc.io.c_req.ready
@@ -161,6 +172,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     mshrAlloc.io.c_req <> sinkC.io.alloc
   }
 
+  // 建立MSHR Alloc与MSHR之间的alloc和state联系
   ms.zipWithIndex.foreach {
     case (mshr, i) =>
       mshr.io.id := i.U
@@ -172,6 +184,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   val bc_mshr = ms.init.last
   val abc_mshr = ms.init.init
 
+  // 将每个MSHR的状态“广播”给RequestBuffer
   abc_mshr.zipWithIndex.foreach{
     case (mshr, i) =>
       a_req_buffer.io.mshr_status(i) := mshr.io.status
@@ -183,6 +196,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   val select_c = c_mshr.io.status.valid
   val select_bc = bc_mshr.io.status.valid
 
+  //
   val bc_mask_latch = RegInit(0.U.asTypeOf(mshrAlloc.io.bc_mask.bits))
   val c_mask_latch = RegInit(0.U.asTypeOf(mshrAlloc.io.c_mask.bits))
   when(mshrAlloc.io.bc_mask.valid) {

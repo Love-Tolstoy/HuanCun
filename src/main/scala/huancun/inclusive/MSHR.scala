@@ -166,11 +166,11 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
   val s_release = RegInit(true.B) // source_c，在source_c上发送release请求
   val s_probeack = RegInit(true.B)  // 在source_c发送probeack响应
   val s_execute = RegInit(true.B) // source_d，在source_d上发送
-  val s_grantack = RegInit(true.B) // source_e
+  val s_grantack = RegInit(true.B) // source_e，在source_e上发送GrantAck响应
   val s_writebacktag = RegInit(true.B) // tag_write
   val s_writebackdir = RegInit(true.B) // dir_write
-  val s_transferput = RegInit(true.B) // writeput to source_a
-  val s_writerelease = RegInit(true.B) // sink_c
+  val s_transferput = RegInit(true.B) // writeput to source_a，将SinkA（Put）中数据写入
+  val s_writerelease = RegInit(true.B) // sink_c，将SinkC（ReleaseAckData）中数据写入主存或外部cache（通过release through）
   val s_triggerprefetch =
     prefetchOpt.map(_ => RegInit(true.B)) // trigger a prefetch training to prefetcher
   val s_prefetchack = prefetchOpt.map(_ => RegInit(true.B)) // resp to prefetcher

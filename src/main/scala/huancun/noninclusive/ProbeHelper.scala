@@ -18,6 +18,7 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters)
 
   val queue = Module(new Queue(new MSHRRequest, entries = entries, pipe = false, flow = false))
 
+  // 如果队列中已经存在的元素数量大于等于可用的空间数量，则表明队列已经满了
   io.full := queue.io.count >= (entries - enqDelay).U
 
   val dir = io.dirResult.bits
@@ -26,6 +27,7 @@ class ProbeHelper(entries: Int = 5, enqDelay: Int = 1)(implicit p: Parameters)
 
   // addr without bankIdx
   val addr = Cat(dir.clients.tag, dir.set(clientSetBits - 1, 0))
+  // head表示从addr中取出前tagBits位个数据，tail表示从addr去掉前tagBits位数据后剩下的数据
   val tgt_tag = addr.head(tagBits)
   val tgt_set = addr.tail(tagBits).head(setBits)
 
