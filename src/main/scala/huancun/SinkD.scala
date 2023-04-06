@@ -38,7 +38,9 @@ class SinkD(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
     val sourceD_r_hazard = Flipped(ValidIO(new SourceDHazard))
   })
 
+  // 计算每个Beat的编号，并将最后一个Beat的编号保存在beat信号中用于后续的处理
   val (first, last, _, beat) = edge.count(io.d)
+  // 请求来自A，preferCache或self.hit
   val cache = io.save_data_in_bs
   val needData = io.d.bits.opcode(0)
 
@@ -50,15 +52,19 @@ class SinkD(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   val new_source = first_resp || io.d.bits.source =/= source_latch
   val indexed_set = RegEnable(io.set, io.d.valid)
   val indexed_way = RegEnable(io.way, io.d.valid)
+  // 不发生竞争冒险
   val w_safe = !new_source && !(io.sourceD_r_hazard.valid && io.sourceD_r_hazard.bits.safe(indexed_set, indexed_way))
 
   assert(!io.d.valid || !needData || io.d.bits.size === log2Up(blockBytes).U, "SinkD must receive aligned message when needData")
 
+  // io.bypass_write.ready表明RefillBuffer有空闲项，可以将数据存入RefillBuffer
   val bypass_ready = io.inner_grant && needData && io.bypass_write.ready
+  // DataStorage可以存数据
   val bs_ready = (needData && w_safe || !first) &&
     cache && io.bs_waddr.ready &&
     (bypass_ready || !io.inner_grant)
 
+   // 接收到带数据的响应
   io.d.ready := !needData || bs_ready || !cache && bypass_ready || (!cache && !io.inner_grant)
 
   // Generate resp

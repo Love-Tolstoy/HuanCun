@@ -53,6 +53,7 @@ class SourceA(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   a_acquire.bits.size := offsetBits.U
   a_acquire.bits.source := io.task.bits.source
   a_acquire.bits.address := Cat(io.task.bits.tag, io.task.bits.set, 0.U(offsetBits.W))
+  // Fill(2, "b1001".U)  // equivalent to "b1001 1001".U
   a_acquire.bits.mask := Fill(edgeOut.manager.beatBytes, 1.U(1.W))
   a_acquire.bits.data := DontCare
   a_acquire.bits.corrupt := false.B
@@ -108,6 +109,7 @@ class SourceA(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   a_put.bits.echo.lift(DirtyKey).foreach(_ := true.B)
   a_put.valid := s1_full
 
+  // 对a_put和a_acquire进行仲裁，将仲裁结果输出到io.a
   TLArbiter.lowest(edgeIn, io.a, a_put, a_acquire)
 
 }

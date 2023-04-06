@@ -15,6 +15,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 16)(implicit p: Paramet
   })
 
   val buffer = Mem(entries, new MSHRRequest)
+  // 表示buffer中的每一项是否有效，true表示被占用，false表示空闲
   val valids = RegInit(VecInit(Seq.fill(entries){ false.B }))
   // which mshr the entry is waiting for
   val wait_table = Reg(Vec(entries, UInt(mshrs.W)))
@@ -37,8 +38,10 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 16)(implicit p: Paramet
   val output_pipe = Queue(issue_arb.io.out, entries = 1, pipe = true, flow = false)
   output_pipe.ready := io.out.ready
 
+  // 若buffer每一项都被占用说明满了
   val full = Cat(valids).andR()
   val no_ready_entry = !output_pipe.valid
+  // 如果buffer中没有可以发射的请求，同时新请求和MSHR及buffer没有冲突，则该请求可以在当拍直接流过Request Buffer，不需要先经过缓冲
   io.out.bits := Mux(no_ready_entry && flow.B, io.in.bits, output_pipe.bits)
   // TODO: flow new request even buffer is full
   io.out.valid := (flow.B && no_ready_entry && io.in.valid && !full) | output_pipe.valid
@@ -55,16 +58,22 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 16)(implicit p: Paramet
     val s_conflict = s.valid && set_conflict(s.bits.set, in_set) && !s.bits.will_free
     s_conflict
   }
+  // 是否有mshr发生set冲突
   val conflict = Cat(conflict_mask).orR()
   // filter out duplicated prefetch requests
+  // 是将输入的in与buffer中存的进行对比
   val dup_mask = (0 until entries) map { i =>
     valids(i) && (Cat(buffer(i).tag, buffer(i).set) === Cat(io.in.bits.tag, io.in.bits.set))
   }
+  // 重复的（tag，set相同）预取（Prefetch）请求会被丢弃，若是预取请求而且发生请求就为1
   val dup = io.in.valid && io.in.bits.isPrefetch.getOrElse(false.B) && Cat(dup_mask).orR()
+  // 对应位置被占用且发生set冲突
   val req_deps = (0 until entries) map { i =>
     valids(i) && set_conflict(buffer(i).set, in_set)
   }
+  // 返回valid最低位为0（空闲）的值
   val insert_idx = PriorityEncoder(~valids.asUInt())
+  // buffer不满，输入有效，仍有请求未处理或者输出未准备好，不是预取或者预取不重复
   val alloc = !full && io.in.valid && !(flow.B && no_ready_entry && io.out.ready) && !dup
   when(alloc){
     buffer(insert_idx) := io.in.bits
@@ -75,6 +84,7 @@ class RequestBuffer(flow: Boolean = true, entries: Int = 16)(implicit p: Paramet
     rdys(insert_idx) := !conflict && !Cat(req_deps).orR()
   }
 
+  // 对应的MSHR释放的标志
   val free_mask = VecInit(io.mshr_status.map(s => s.valid && s.bits.will_free)).asUInt()
   for (i <- 0 until entries){
     when(valids(i)){

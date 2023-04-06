@@ -41,12 +41,16 @@ class SourceC(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
     val task = Flipped(DecoupledIO(new SourceCReq))
   })
 
+  // 7
   val queue_size = 4 + sramLatency
   val queue_flow = true
 
   val bs_busy = RegInit(false.B)
   val back_pressure = RegInit(false.B)
+  // 创建一个entries为7，每一项为chiselTypeOf(io.c.bits)（返回硬件对象的chisel类型，允许从它构造其他硬件）
+  // flow为true则表示输入可以在先沟通周期被消耗
   val queue = Module(new Queue(chiselTypeOf(io.c.bits), entries = queue_size, flow = queue_flow))
+  // count指示队列中的当前数据量
   back_pressure := queue.io.count >= (queue_size - sramLatency - beatSize).U // 2 in pipeline and beatSize in pending
 
   // Handle task
@@ -58,6 +62,7 @@ class SourceC(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   val task = Mux(!bs_busy, io.task.bits, task_latch)
   val taskWithData = io.task.valid && !back_pressure && io.task.bits.opcode(0)
   when(taskWithData) { bs_busy := true.B }
+  // ~0.U(beatBits.W)表示所有位都为1
   when(io.bs_raddr.fire() && beat === ~0.U(beatBits.W)) { bs_busy := false.B }
   io.task.ready := !bs_busy && !back_pressure
 
@@ -88,6 +93,7 @@ class SourceC(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   s1_info.valid := s1_valid
   s1_info.bits.apply(s1_task, s1_beat)
 
+  // s1_info为Valid接口，sramLattency-1为流水线阶段的数量，返回最后一级流水线的Valid输出
   val pipeOut = Pipe(s1_info, sramLatency-1)
 
   queue.io.enq.valid := pipeOut.valid

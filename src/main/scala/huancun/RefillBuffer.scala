@@ -31,6 +31,7 @@ class RefillBuffer(implicit p: Parameters) extends HuanCunModule {
     val w = new SinkDBufferWrite()
   })
 
+  // 7*2
   val buffer = Mem(bufBlocks, Vec(beatSize, new DSData()))
   val valids = RegInit(VecInit(Seq.fill(bufBlocks){
     VecInit(Seq.fill(beatSize){false.B})

@@ -160,12 +160,12 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
   }
 
   // Set tasks to be scheduled and resps to wait for
-  val s_acquire = RegInit(true.B) // source_a
-  val s_rprobe = RegInit(true.B) // source_b
+  val s_acquire = RegInit(true.B) // source_a，在source_a上发送acquire请求
+  val s_rprobe = RegInit(true.B) // source_b，在source_b上发送probe请求
   val s_pprobe = RegInit(true.B)
-  val s_release = RegInit(true.B) // source_c
-  val s_probeack = RegInit(true.B)
-  val s_execute = RegInit(true.B) // source_d
+  val s_release = RegInit(true.B) // source_c，在source_c上发送release请求
+  val s_probeack = RegInit(true.B)  // 在source_c发送probeack响应
+  val s_execute = RegInit(true.B) // source_d，在source_d上发送
   val s_grantack = RegInit(true.B) // source_e
   val s_writebacktag = RegInit(true.B) // tag_write
   val s_writebackdir = RegInit(true.B) // dir_write
