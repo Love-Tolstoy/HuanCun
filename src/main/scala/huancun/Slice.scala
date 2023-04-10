@@ -190,13 +190,14 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
       a_req_buffer.io.mshr_status(i) := mshr.io.status
   }
 
+  // 当c_mshr有效阻塞bc_mshr、abc_mshr，当bc_mshr有效，阻塞abc_mshr
   val block_bc = c_mshr.io.status.valid
   val block_abc = block_bc || bc_mshr.io.status.valid
 
   val select_c = c_mshr.io.status.valid
   val select_bc = bc_mshr.io.status.valid
 
-  //
+  // 标志与第几个mshr发生set冲突
   val bc_mask_latch = RegInit(0.U.asTypeOf(mshrAlloc.io.bc_mask.bits))
   val c_mask_latch = RegInit(0.U.asTypeOf(mshrAlloc.io.c_mask.bits))
   when(mshrAlloc.io.bc_mask.valid) {
@@ -205,12 +206,15 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   when(mshrAlloc.io.c_mask.valid) {
     c_mask_latch := mshrAlloc.io.c_mask.bits
   }
+  // disable参数表示c或bc mshr有效且与abc mshr发生了冲突
+  // 若存在高优先级的请求，那么与之发生冲突的abc mshr暂停
   abc_mshr.zipWithIndex.foreach {
     case (mshr, i) =>
       val bc_disable = bc_mask_latch(i) && select_bc
       val c_disable = c_mask_latch(i) && select_c
       mshr.io.enable := !(bc_disable || c_disable)
   }
+  // bc mshr暂停的条件是c mshr有效其与其冲突
   bc_mshr.io.enable := !(c_mask_latch(mshrsAll-2) && select_c)
   c_mshr.io.enable := true.B
 
@@ -218,6 +222,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     m.asInstanceOf[noninclusive.MSHR]
   }
 
+  // 若是Noninclusive，则需要对io_c_status、io_b_status进行更新
   abc_mshr.foreach {
     case mshr: noninclusive.MSHR =>
       mshr.io_c_status.set := c_mshr.io.status.bits.set
@@ -267,6 +272,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     case _: inclusive.MSHR =>
   }
 
+  // 通过state信号提取嵌套修改信息（包括各种权限的变化，dirty等）
   val nestedWb = Wire(new NestedWriteback)
   nestedWb := DontCare
   nestedWb.set := Mux(select_c, c_mshr.io.status.bits.set, bc_mshr.io.status.bits.set)
@@ -290,12 +296,16 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     case mshr: noninclusive.MSHR =>
       mshr.io.tasks.dir_write.bits.data.dirty
   }
+  // b mshr嵌套写回self_meta，会将self_meta置为INVALID（b_toN）
+  // b mshr嵌套写回self_meta，会将self_meta置为BRANCH（b_toB）
   nestedWb.b_toN := select_bc && !select_c &&
     bc_mshr.io.tasks.dir_write.valid &&
     bc_wb_state === MetaData.INVALID
   nestedWb.b_toB := select_bc && !select_c &&
     bc_mshr.io.tasks.dir_write.valid &&
     bc_wb_state === MetaData.BRANCH
+  // b mshr嵌套清除self_meta的dirty位（b_clr_Dirty）
+  // b mshr嵌套置位self_meta的dirty位（b_set_Dirty）
   nestedWb.b_clr_dirty := select_bc && !select_c &&
     bc_mshr.io.tasks.dir_write.valid &&
     !MetaData.isT(bc_wb_state)
@@ -387,6 +397,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     if (cacheParams.inclusive) new inclusive.Directory()
     else new noninclusive.Directory()
   })
+  // 对于L3来说，读目录的请求不仅来自MSHR Alloc，还可能来自SliceCtrl
   directory.io.read <> ctrl_arb(mshrAlloc.io.dirRead, ctrl.map(_.io.dir_read))
   ctrl.map(c => {
     c.io.dir_result.valid := directory.io.result.valid && directory.io.result.bits.idOH(1, 0) === "b11".U

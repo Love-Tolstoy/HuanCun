@@ -49,14 +49,14 @@ class DataStorage(implicit p: Parameters) extends HuanCunModule {
   val stackBits = log2Ceil(nrStacks)
   // 每个bank是8个字节
   val bankBytes = 8
-  val rowBytes = nrStacks * beatBytes
+  val rowBytes = nrStacks * beatBytes // 2*32=64
   // 对于L2，应该是4096行
   val nrRows = sizeBytes / rowBytes
   // 一个Cache line可以分成8个bank
-  val nrBanks = rowBytes / bankBytes
+  val nrBanks = rowBytes / bankBytes  // 64/8=8
   val rowBits = log2Ceil(nrRows)
   // 每个stack有32个字节
-  val stackSize = nrBanks / nrStacks
+  val stackSize = nrBanks / nrStacks // 8/2=4
   val sramSinglePort = true
 
   // Suppose * as one bank

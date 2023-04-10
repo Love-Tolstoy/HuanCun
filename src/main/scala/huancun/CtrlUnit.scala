@@ -42,6 +42,8 @@ class CtrlUnitImp(wrapper: CtrlUnit) extends LazyModuleImp(wrapper) {
   val node = wrapper.node
   val ctlnode = wrapper.ctlnode
 
+  // Config寄存器定义
+  // 生成一个只读寄存器，位宽位8，初始化node.edges.in.size.U。
   val banksR = RegField.r(
     8, node.edges.in.size.U,
     RegFieldDesc("Banks", "Number of banks in the cache", reset=Some(node.edges.in.size))
