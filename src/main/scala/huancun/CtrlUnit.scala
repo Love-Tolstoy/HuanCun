@@ -123,6 +123,7 @@ class CtrlUnitImp(wrapper: CtrlUnit) extends LazyModuleImp(wrapper) {
       "Ctrl", None,
       ctl_config_regs
     ),
+    // 只写寄存器，一旦写这个寄存器，就代表有一个操作要被发送到Slice内
     0x0200 -> Seq(RegField.w(64, RegWriteFn((ivalid, oready, data) => {
       when(oready){ cmd_out_ready := true.B }
       when(ivalid){ cmd_in_valid := true.B }

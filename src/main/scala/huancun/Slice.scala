@@ -434,16 +434,21 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     sink <> arbiter.io.out
   }
 
+  // 若是L3，则对xs.last和ctrl进行仲裁，返回值是xs.init组合上last
   def add_ctrl[T <: Data](xs: Seq[DecoupledIO[T]], ctrl: Option[DecoupledIO[T]]): Seq[DecoupledIO[T]] = {
     val last = if(ctrl.nonEmpty) ctrl_arb(xs.last, ctrl) else xs.last
     xs.init :+ last
   }
 
   // don't allow b write back when c is valid to simplify 'NestedWriteBack'
+  // 目录的dirWReq与仲裁出来的ms的其中一个dir_write相连
   block_b_c(
+    // 为什么这里使用了流水线
     Pipeline.pipeTo(directory.io.dirWReq),
+    // 若是L2直接返回ms的dir_write，若是L3则ctrl加入仲裁
     add_ctrl(ms.map(_.io.tasks.dir_write), ctrl.map(_.io.s_dir_w))
   )
+  // 将所有mshr仲裁的结果给通道.io.task
   arbTasks(sourceA.io.task, ms.map(_.io.tasks.source_a), Some("sourceA"), latch=true)
   arbTasks(sourceB.io.task, ms.map(_.io.tasks.source_b), Some("sourceB"), latch=true)
   arbTasks(sourceC.io.task, ms.map(_.io.tasks.source_c), Some("sourceC"), latch=true)
@@ -457,6 +462,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     Some("tagWrite")
   )
   (directory, ms) match {
+    // 若是Noninclusive，则需要考虑CtrlUnit
     case (dir: noninclusive.Directory, ms: Seq[noninclusive.MSHR]) =>
       block_b_c(
         Pipeline.pipeTo(dir.io.clientDirWReq),
