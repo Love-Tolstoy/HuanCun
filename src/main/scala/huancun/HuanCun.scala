@@ -173,6 +173,7 @@ abstract class HuanCunModule(implicit val p: Parameters) extends MultiIOModule w
 
 class HuanCun(implicit p: Parameters) extends LazyModule with HasHuanCunParameters {
 
+  // 定义模块读取和写入的大小
   val xfer = TransferSizes(blockBytes, blockBytes)
   val atom = TransferSizes(1, cacheParams.channelBytes.d.get)
   val access = TransferSizes(1, blockBytes)
@@ -332,6 +333,7 @@ class HuanCun(implicit p: Parameters) extends LazyModule with HasHuanCunParamete
           case BankBitsKey => bankBits
         })) }
         slice.io.in <> in
+        // 以offset把地址分为高位部分和低位部分，在之间插入bankBits
         in.b.bits.address := restoreAddress(slice.io.in.b.bits.address, i)
         out <> slice.io.out
         out.a.bits.address := restoreAddress(slice.io.out.a.bits.address, i)
@@ -339,6 +341,7 @@ class HuanCun(implicit p: Parameters) extends LazyModule with HasHuanCunParamete
 
         slice.io.prefetch.zip(prefetcher).foreach {
           case (s, p) =>
+            // bank_eq的作用是取p.io.req.bits.set的前bankBits与i是否相等作为返回值
             s.req.valid := p.io.req.valid && bank_eq(p.io.req.bits.set, i, bankBits)
             s.req.bits := p.io.req.bits
             prefetchReqsReady(i) := s.req.ready && bank_eq(p.io.req.bits.set, i, bankBits)

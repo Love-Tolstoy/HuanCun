@@ -225,6 +225,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
     when(req.fromC) {
       // Release
       s_execute := false.B
+      // 需要修改dir
       when(
         !meta.dirty && req.opcode(0) || // from clean to dirty
           (req.param === TtoB || req.param === TtoN) && meta.state === TRUNK || // from TRUNK to TIP
@@ -232,7 +233,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
       ) { // change clients
         s_writebackdir := false.B
       }
-
+      // Release携带数据
       when(req.opcode(0)) { // has data
         s_writerelease := false.B
         // when (req.opcode === ReleaseData) {
@@ -242,6 +243,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, DirWrite, TagWr
 
     }.elsewhen(req.fromB) {
       // Probe
+      // 不命中，或者命中不改变状态
       s_probeack := false.B
       when(meta.hit) {
         when(isT(meta.state) && req.param =/= toT || meta.state === BRANCH && req.param === toN) { // state demotion
