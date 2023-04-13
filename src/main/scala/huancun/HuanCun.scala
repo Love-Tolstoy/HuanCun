@@ -72,6 +72,7 @@ trait HasHuanCunParameters {
   // req -> sram ports 1 cycle
   // sram 1 or 2 cycles
   // sram ports -> channels 1 cycle
+  // sramClkDivBy2: L2=false, L3=true
   val sramLatency = 1 + 1 + (if(cacheParams.sramClkDivBy2) 3 else 1)
 
   val numCSRPCntHc    = 5

@@ -98,6 +98,15 @@ case class CacheCtrl
   numCores: Int = 1
 )
 
+// 在top/config.scala文件中，香山默认的配置是：
+/*
+ class DefaultConfig(n: Int = 1) extends Config(
+  new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
+    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4, alwaysReleaseData = true)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)
+ */
 case class HCCacheParameters
 (
   name: String = "L2",
@@ -115,9 +124,9 @@ case class HCCacheParameters
   enableTopDown: Boolean = false,
   channelBytes: TLChannelBeatBytes = TLChannelBeatBytes(32),
   prefetch: Option[PrefetchParameters] = None,
-  clientCaches: Seq[CacheParameters] = Nil,
-  inclusive: Boolean = true,
-  alwaysReleaseData: Boolean = false,
+  clientCaches: Seq[CacheParameters] = Nil, // L2是dcache，L3是L2
+  inclusive: Boolean = true,  // L2、L3是noninclusive，
+  alwaysReleaseData: Boolean = false, // L2是false，L3是true
   tagECC:            Option[String] = None,
   dataECC:           Option[String] = None,
   echoField: Seq[BundleFieldBase] = Nil,
@@ -125,9 +134,9 @@ case class HCCacheParameters
   respKey: Seq[BundleKeyBase] = Nil,
   reqKey: Seq[BundleKeyBase] = Seq(PrefetchKey, PreferCacheKey, AliasKey), // slave
   respField: Seq[BundleFieldBase] = Nil,
-  ctrl: Option[CacheCtrl] = None,
-  sramClkDivBy2: Boolean = false,
-  sramDepthDiv: Int = 1,
+  ctrl: Option[CacheCtrl] = None, // L3定义了起始地址和范围
+  sramClkDivBy2: Boolean = false, // L3是true
+  sramDepthDiv: Int = 1,  // L2是2，L3是4
   simulation: Boolean = false,
   innerBuf: TLBufferParams = TLBufferParams(),
   outerBuf: TLBufferParams = TLBufferParams(
