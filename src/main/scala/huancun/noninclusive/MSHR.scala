@@ -21,6 +21,7 @@ class C_Status(implicit p: Parameters) extends HuanCunBundle {
   val releaseThrough = Output(Bool())
 }
 
+
 // 非主要class，先不管
 class B_Status(implicit p: Parameters) extends HuanCunBundle {
   val set = Input(UInt(setBits.W))
@@ -42,12 +43,19 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     override val dirResult = Flipped(ValidIO(new DirResult()))
   })
 
+  // io_c_status：c MSHR => abc MSHR
   val io_c_status = IO(new C_Status)
+  // io_b_status：b MSHR => abc MSHR
   val io_b_status = IO(new B_Status())
+  // io_releaseThrough：bc MSHR/abc MSHR => c MSHR
   val io_releaseThrough = IO(Input(Bool()))
+  // io_probeAckDataThrough：abc MSHR => b MSHR
   val io_probeAckDataThrough = IO(Input(Bool()))
+  // io_is_nestedReleaseData：c MSHR => bc MSHR/abc MSHR
   val io_is_nestedReleaseData = IO(Output(Bool()))
+  // io_is_nestedProbeAckData：b MSHR => abc MSHR
   val io_is_nestedProbeAckData = IO(Output(Bool()))
+  // io_probeHelperFinish：b MSHR => abc MSHR
   val io_probeHelperFinish = IO(Output(Bool()))
   // 以上为MSHR的各个接口，包括模块内部x MSHR之间的连接
 

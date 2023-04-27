@@ -31,6 +31,7 @@ object MetaData {
   def TIP:     UInt = 3.U(stateBits.W) // we are trunk, inner masters are branch
 
   // Does a request need trunk?
+  // opcode小于4有什么规律(主动请求或响应？) 或 预取写请求 或 Acquire请求不是NtoB
   def needT(opcode: UInt, param: UInt): Bool = {
     !opcode(2) ||
     (opcode === TLMessages.Hint && param === TLHints.PREFETCH_WRITE) ||
