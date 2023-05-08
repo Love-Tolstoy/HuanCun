@@ -191,6 +191,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val prefetch_miss_need_probe_vec = VecInit(clients_meta.zipWithIndex.map {
     case (meta, i) =>
       i.U =/= iam &&
+      i.U =/= iam &&
         (req.param === PREFETCH_WRITE && isT(meta.state) && meta.hit && (!self_meta.hit || !isT(self_meta.state)) ||
           req.param === PREFETCH_READ && meta.hit && !self_meta.hit && !clients_meta(iam).hit)
   })

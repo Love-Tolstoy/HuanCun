@@ -104,6 +104,7 @@ trait HasHuanCunParameters {
     cacheParams.clientCaches.head.blockGranularity
   } else setBits
 
+  // 这段代码是路由请求或响应返回哪个上级或下级缓存的
   def getClientBitOH(sourceId: UInt): UInt = {
     if (clientBits == 0) {
       0.U
