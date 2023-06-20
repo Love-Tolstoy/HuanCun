@@ -32,6 +32,8 @@ class B_Status(implicit p: Parameters) extends HuanCunBundle {
   val probeAckDataThrough = Output(Bool())
 }
 
+// 这里只有tasks/dir_write/tag_write/dirResult四个信号，没有resps/status/alloc
+// extends的BaseMSHR中定义了一个BaseMSHRIO类型的io，BaseMSHRIO中有信号resps/status/alloc等
 class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, SelfTagWrite] with HasClientInfo {
   val io = IO(new BaseMSHRIO[DirResult, SelfDirWrite, SelfTagWrite] {
     override val tasks = new MSHRTasks[SelfDirWrite, SelfTagWrite] {
@@ -597,7 +599,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
 
   // Set tasks to be scheduled and resps to wait for
   // MSHR在拿到读目录的结果后会把需要完成的时间置位false，表示请求还未发送或者应答还未收到
-  // 在时间完成后再将寄存器置为True，当所有事件都完成后，该项MSHR就会释放。
+  // 在事件完成后再将寄存器置为True，当所有事件都完成后，该项MSHR就会释放。
   val s_acquire = RegInit(true.B) // source_a
   val s_probe = RegInit(true.B) // source_b
   val s_release = RegInit(true.B) // source_c
@@ -1040,6 +1042,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   io.tasks.prefetch_train.foreach(_.valid := !s_triggerprefetch.get)
   io.tasks.prefetch_resp.foreach(_.valid := !s_prefetchack.get && w_grantfirst)
 
+  // 等价关系，所有在od上做的修改都会映射到io.tasks.source_d.bits
   val oa = io.tasks.source_a.bits
   val ob = io.tasks.source_b.bits
   val oc = io.tasks.source_c.bits
@@ -1222,6 +1225,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     } else {
       Mux(req.param === BtoT && req.opcode === AcquirePerm, Grant, GrantData)
     }
+    // opSeq是通道A的message对应的response，且Seq的序号与message的opcode是对应的，所以可以直接用opToA作为返回的response
     val opSeq = Seq(AccessAck, AccessAck, AccessAckData, AccessAckData, AccessAckData, HintAck, grantOp, Grant)
     val opToA = VecInit(opSeq)(r.opcode)
     Mux(r.fromA, opToA, ReleaseAck)

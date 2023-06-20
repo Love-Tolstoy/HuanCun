@@ -67,17 +67,17 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
     req.fromA && (
       req.opcode === TLMessages.GrantData ||
         req.opcode === TLMessages.AccessAckData ||
-        req.opcode === TLMessages.AccessAck && !req.bypassPut
+        req.opcode === TLMessages.AccessAck && !req.bypassPut // bypassPut：Put数据直接bypass到下层。不在DataStorage中存放
       )
   }
 
   // stage1
   val busy = RegInit(false.B)
   val s1_block_r = RegInit(false.B)
-  val s1_req_reg = RegEnable(io.task.bits, io.task.fire())
-  val s1_req = Mux(busy, s1_req_reg, io.task.bits)
+  val s1_req_reg = RegEnable(io.task.bits, io.task.fire())  // 寄存器存task
+  val s1_req = Mux(busy, s1_req_reg, io.task.bits)  // 接收来自MSHR的task
   val s1_needData = needData(s1_req)
-  val s1_need_pb = s1_req.fromA && (s1_req.opcode === TLMessages.AccessAck && !s1_req.bypassPut)
+  val s1_need_pb = s1_req.fromA && (s1_req.opcode === TLMessages.AccessAck && !s1_req.bypassPut)  // 说明为Put请求
   val s1_counter = RegInit(0.U(beatBits.W)) // how many beats have been sent
   val s1_total_beats = Mux(s1_needData, totalBeats(s1_req.size), 0.U(beatBits.W))
   val s1_beat = startBeat(s1_req.off) | s1_counter
@@ -92,6 +92,7 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
   s1_queue.io.enq.bits := s1_bypass_data
   assert(!s1_queue.io.enq.valid || s1_queue.io.enq.ready)
 
+  // 向DataStorage发送读请求
   io.bs_raddr.valid := s1_valid_r && !s1_req.useBypass
   io.bs_raddr.bits.way := s1_req.way
   io.bs_raddr.bits.set := s1_req.set
@@ -99,6 +100,7 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
   io.bs_raddr.bits.write := false.B
   io.bs_raddr.bits.noop := false.B
 
+  // 向RefillBuffer发送读请求，useBypass使用RefillBuffer的bypass数据
   io.bypass_read.valid := s1_valid_r && s1_req.useBypass
   io.bypass_read.id := s1_req.bufIdx
   io.bypass_read.beat := s1_beat
@@ -108,7 +110,7 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
     busy := true.B
   }
   when(Mux(s1_req.useBypass, s1_bypass_hit, io.bs_raddr.fire())){
-    s1_block_r := true.B
+    s1_block_r := true.B  // 读完一个beat阻塞，等待该Beat进入s2，读取下一个Beat
   }
   // 当最后一个Beat的请求发完才允许新的Task进入
   when(s1_valid && s2_ready) {
@@ -148,7 +150,7 @@ class SourceD(implicit p: Parameters) extends HuanCunModule {
   io.pb_pop.bits.count := s2_counter
   io.pb_pop.bits.last  := s2_last
 
-  // 创建一个包含6个entries，且每一项是PutBufferBeatEntry的队列
+  // 创建一个包含6个entries，且每一项是PutBufferBeatEntry的队列，pipe为true则表示单个的entry队列可以全吞吐量运行，flow为true则表示输入可以在同一周期内被消耗。
   val pbQueue = Module(new Queue(new PutBufferBeatEntry, beatSize * sramLatency, flow = false, pipe = false))
 
   when (pb_ready) { s2_valid_pb := false.B }

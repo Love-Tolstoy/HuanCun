@@ -197,7 +197,7 @@ class HuanCun(implicit p: Parameters) extends LazyModule with HasHuanCunParamete
     responseKeys = cacheParams.respKey
   )
 
-  val node = TLAdapterNode(
+  val node = TLAdapterNode( // Cache一般采用AdapterNode，不改变参数类型
     clientFn = { _ => clientPortParams },
     managerFn = { m =>
       TLSlavePortParameters.v1(
